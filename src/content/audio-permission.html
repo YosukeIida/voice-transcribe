@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Audio Permission</title>
+</head>
+<body>
+  <script>
+    // 音声権限を取得
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        // 権限取得成功
+        console.log('マイク権限を取得しました');
+        
+        // 親ウィンドウに通知
+        parent.postMessage({ type: 'audioPermissionGranted' }, '*');
+        
+        // ストリームを親ウィンドウに渡す
+        if (window.parent !== window) {
+          parent.postMessage({ 
+            type: 'audioStream',
+            streamId: stream.id 
+          }, '*');
+        }
+      })
+      .catch((error) => {
+        // 権限取得失敗
+        console.error('マイク権限の取得に失敗しました:', error);
+        parent.postMessage({ 
+          type: 'audioPermissionDenied',
+          error: error.message 
+        }, '*');
+      });
+  </script>
+</body>
+</html>
