@@ -3,34 +3,305 @@
 <head>
   <meta charset="UTF-8">
   <title>Audio Permission</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: transparent;
+    }
+  </style>
 </head>
 <body>
   <script>
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+
+    // 権限状態を親ウィンドウに通知
+    function notifyParent(message) {
+      if (window.parent !== window) {
+        window.parent.postMessage({
+          source: 'voice-transcribe-permission',
+          ...message
+        }, '*');
+      }
+    }
+
+    // 権限状態をチェック
+    async function checkPermissionStatus() {
+      try {
+        const permissionStatus = await navigator.permissions.query({ name: 'microphone' });
+        return permissionStatus.state;
+      } catch (error) {
+        console.error('Permission query failed:', error);
+        return 'prompt';
+      }
+    }
+
+    // MediaRecorderの設定
+    function setupMediaRecorder(stream) {
+      // サポートされているMIMEタイプを確認
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+      ];
+
+      let selectedMimeType = '';
+      for (const mimeType of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+
+      if (!selectedMimeType) {
+        throw new Error('No supported audio MIME type found');
+      }
+
+      const options = {
+        mimeType: selectedMimeType,
+        audioBitsPerSecond: 128000, // 128kbps
+      };
+
+      mediaRecorder = new MediaRecorder(stream, options);
+      
+      // データが利用可能になったときの処理
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+          
+          // データをBase64に変換して親ウィンドウに送信
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result.split(',')[1];
+            notifyParent({
+              type: 'audioData',
+              data: base64data,
+              mimeType: selectedMimeType,
+              timestamp: Date.now()
+            });
+          };
+          reader.readAsDataURL(event.data);
+        }
+      };
+
+      // 録音開始時の処理
+      mediaRecorder.onstart = () => {
+        isRecording = true;
+        audioChunks = [];
+        notifyParent({ type: 'recordingStarted' });
+      };
+
+      // 録音停止時の処理
+      mediaRecorder.onstop = () => {
+        isRecording = false;
+        
+        // 全ての音声データを結合
+        if (audioChunks.length > 0) {
+          const audioBlob = new Blob(audioChunks, { type: selectedMimeType });
+          audioChunks = [];
+          
+          // 最終的な音声データを送信
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result.split(',')[1];
+            notifyParent({
+              type: 'recordingComplete',
+              data: base64data,
+              mimeType: selectedMimeType,
+              size: audioBlob.size,
+              duration: mediaRecorder.stream ? mediaRecorder.stream.getTracks()[0].getSettings().sampleRate : 0
+            });
+          };
+          reader.readAsDataURL(audioBlob);
+        }
+        
+        notifyParent({ type: 'recordingStopped' });
+      };
+
+      // エラー処理
+      mediaRecorder.onerror = (error) => {
+        console.error('MediaRecorder error:', error);
+        notifyParent({
+          type: 'recordingError',
+          error: error.toString()
+        });
+      };
+
+      return selectedMimeType;
+    }
+
     // 音声権限を取得
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then((stream) => {
-        // 権限取得成功
+    async function requestAudioPermission() {
+      try {
+        // 既存の権限状態を確認
+        const initialStatus = await checkPermissionStatus();
+        notifyParent({ 
+          type: 'permissionStatus', 
+          status: initialStatus 
+        });
+
+        // 権限が既に許可されている場合
+        if (initialStatus === 'granted') {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              sampleRate: 48000,
+              channelCount: 1
+            } 
+          });
+          
+          // MediaRecorderをセットアップ
+          const mimeType = setupMediaRecorder(stream);
+          
+          notifyParent({ 
+            type: 'audioPermissionGranted',
+            streamId: stream.id,
+            mimeType: mimeType
+          });
+          
+          // ストリームは後で使用するため保持
+          window.audioStream = stream;
+          return;
+        }
+
+        // 権限をリクエスト
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 48000,
+            channelCount: 1
+          } 
+        });
+
         console.log('マイク権限を取得しました');
         
-        // 親ウィンドウに通知
-        parent.postMessage({ type: 'audioPermissionGranted' }, '*');
+        // MediaRecorderをセットアップ
+        const mimeType = setupMediaRecorder(stream);
         
-        // ストリームを親ウィンドウに渡す
-        if (window.parent !== window) {
-          parent.postMessage({ 
-            type: 'audioStream',
-            streamId: stream.id 
-          }, '*');
+        // 権限取得成功を通知
+        notifyParent({ 
+          type: 'audioPermissionGranted',
+          streamId: stream.id,
+          mimeType: mimeType
+        });
+        
+        // ストリームは後で使用するため保持
+        window.audioStream = stream;
+
+        // 権限状態の変更を監視
+        const permissionStatus = await navigator.permissions.query({ name: 'microphone' });
+        permissionStatus.addEventListener('change', async () => {
+          notifyParent({ 
+            type: 'permissionStatus', 
+            status: permissionStatus.state 
+          });
+        });
+
+      } catch (error) {
+        // エラーの種類を判別
+        let errorType = 'unknown';
+        let errorMessage = error.message;
+
+        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+          errorType = 'denied';
+          errorMessage = 'マイクへのアクセスが拒否されました';
+        } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+          errorType = 'no_device';
+          errorMessage = 'マイクが見つかりません';
+        } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+          errorType = 'hardware_error';
+          errorMessage = 'マイクにアクセスできません（他のアプリが使用中の可能性があります）';
+        } else if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+          errorType = 'constraint_error';
+          errorMessage = '要求された音声設定がサポートされていません';
         }
-      })
-      .catch((error) => {
-        // 権限取得失敗
+
         console.error('マイク権限の取得に失敗しました:', error);
-        parent.postMessage({ 
+        
+        notifyParent({ 
           type: 'audioPermissionDenied',
-          error: error.message 
-        }, '*');
-      });
+          errorType: errorType,
+          error: errorMessage,
+          originalError: error.name
+        });
+      }
+    }
+
+    // 録音制御
+    function startRecording(timeslice = 1000) {
+      if (mediaRecorder && mediaRecorder.state === 'inactive') {
+        mediaRecorder.start(timeslice);
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+    }
+
+    function pauseRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.pause();
+        notifyParent({ type: 'recordingPaused' });
+      }
+    }
+
+    function resumeRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'paused') {
+        mediaRecorder.resume();
+        notifyParent({ type: 'recordingResumed' });
+      }
+    }
+
+    // メッセージリスナー（親ウィンドウからのコマンド用）
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.source === 'voice-transcribe-content') {
+        switch (event.data.action) {
+          case 'requestPermission':
+            requestAudioPermission();
+            break;
+          
+          case 'startRecording':
+            startRecording(event.data.timeslice || 1000);
+            break;
+          
+          case 'stopRecording':
+            stopRecording();
+            break;
+          
+          case 'pauseRecording':
+            pauseRecording();
+            break;
+          
+          case 'resumeRecording':
+            resumeRecording();
+            break;
+          
+          case 'releaseStream':
+            if (window.audioStream) {
+              window.audioStream.getTracks().forEach(track => track.stop());
+              window.audioStream = null;
+              notifyParent({ type: 'streamReleased' });
+            }
+            if (mediaRecorder) {
+              mediaRecorder = null;
+            }
+            break;
+        }
+      }
+    });
+
+    // ページロード時に自動的に権限をリクエスト
+    requestAudioPermission();
   </script>
 </body>
 </html>
