@@ -22,7 +22,7 @@ interface MessageRequest {
 }
 
 // メッセージリスナー
-chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request: MessageRequest, _sender, sendResponse) => {
   switch (request.action) {
     case 'startRecording':
       void startRecording();
@@ -195,19 +195,19 @@ function updateIcon(recording: boolean) {
   if (recording) {
     void chrome.action.setIcon({
       path: {
-        '16': '/icons/icon-recording-16.png',
-        '32': '/icons/icon-recording-32.png',
-        '48': '/icons/icon-recording-48.png',
-        '128': '/icons/icon-recording-128.png',
+        '16': 'icons/icon-recording-16.png',
+        '32': 'icons/icon-recording-32.png',
+        '48': 'icons/icon-recording-48.png',
+        '128': 'icons/icon-recording-128.png',
       },
     });
   } else {
     void chrome.action.setIcon({
       path: {
-        '16': '/icons/icon-16.png',
-        '32': '/icons/icon-32.png',
-        '48': '/icons/icon-48.png',
-        '128': '/icons/icon-128.png',
+        '16': 'icons/icon-16.png',
+        '32': 'icons/icon-32.png',
+        '48': 'icons/icon-48.png',
+        '128': 'icons/icon-128.png',
       },
     });
   }

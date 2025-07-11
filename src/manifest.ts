@@ -20,7 +20,7 @@ export default defineManifest({
       '128': 'icons/icon-128.png',
     },
   },
-  permissions: ['storage', 'scripting'],
+  permissions: ['storage', 'scripting', 'contextMenus'],
   host_permissions: ['https://www.notion.so/*', 'https://api.openai.com/*'],
   background: {
     service_worker: 'src/background/index.ts',

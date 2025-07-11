@@ -4,10 +4,9 @@ import preact from '@preact/preset-vite';
 import manifest from './src/manifest';
 
 export default defineConfig({
-  plugins: [
-    preact(),
-    crx({ manifest }),
-  ],
+  plugins: [preact(), crx({ manifest })],
+  base: './', // Chrome拡張機能用に相対パスを使用
+  publicDir: 'public',
   resolve: {
     alias: {
       '@': '/src',

@@ -31,7 +31,7 @@ interface PermissionMessageData {
 chrome.runtime.onMessage.addListener(
   (
     request: RequestMessage,
-    sender: chrome.runtime.MessageSender,
+    _sender: chrome.runtime.MessageSender,
     sendResponse: (response?: any) => void,
   ) => {
     if (request.action === 'startRecording') {
@@ -43,13 +43,17 @@ chrome.runtime.onMessage.addListener(
     } else if (request.action === 'pauseRecording') {
       pauseRecording();
       sendResponse({ success: true });
+      return false;
     } else if (request.action === 'resumeRecording') {
       resumeRecording();
       sendResponse({ success: true });
+      return false;
     } else if (request.action === 'insertText' && request.text) {
       insertTextAtCursor(request.text);
       sendResponse({ success: true });
+      return false;
     }
+    return false;
   },
 );
 

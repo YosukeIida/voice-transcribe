@@ -19,15 +19,42 @@ export function App() {
       return;
     }
 
-    setIsRecording(true);
-    // バックグラウンドスクリプトに録音開始を通知
-    chrome.runtime.sendMessage({ action: 'startRecording' });
+    try {
+      // まずポップアップでマイク権限を取得（Chrome拡張機能の制約）
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('ポップアップ: マイク権限を取得しました');
+
+      // ストリームを停止（実際の録音はcontent scriptで行う）
+      stream.getTracks().forEach((track) => track.stop());
+
+      setIsRecording(true);
+      // バックグラウンドスクリプトに録音開始を通知
+      chrome.runtime.sendMessage({ action: 'startRecording' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('Service Workerへのメッセージ送信エラー:', chrome.runtime.lastError);
+          setIsRecording(false);
+        } else {
+          console.log('Service Workerに録音開始メッセージを送信しました:', response);
+        }
+      });
+    } catch (error) {
+      console.error('マイク権限の取得に失敗しました:', error);
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          alert('マイクへのアクセスが拒否されました。ブラウザの設定から許可してください。');
+        } else if (error.name === 'NotFoundError') {
+          alert('マイクが見つかりません。マイクが接続されているか確認してください。');
+        } else {
+          alert(`エラーが発生しました: ${error.message}`);
+        }
+      }
+    }
   };
 
   const handleStopRecording = () => {
     setIsRecording(false);
     // バックグラウンドスクリプトに録音停止を通知
-    chrome.runtime.sendMessage({ action: 'stopRecording' });
+    void chrome.runtime.sendMessage({ action: 'stopRecording' });
   };
 
   const handleSaveApiKey = () => {
@@ -43,7 +70,7 @@ export function App() {
   return (
     <div className={styles.popupContainer}>
       <h1 className={styles.title}>Voice Transcribe</h1>
-      
+
       {!hasApiKey && (
         <div className={styles.apiKeySection}>
           <input
@@ -62,7 +89,7 @@ export function App() {
       <div className={styles.controls}>
         {!isRecording ? (
           <button
-            onClick={handleStartRecording}
+            onClick={() => void handleStartRecording()}
             className={`${styles.button} ${styles.buttonRecord}`}
             disabled={!hasApiKey}
           >
