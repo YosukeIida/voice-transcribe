@@ -21,6 +21,95 @@ interface MessageRequest {
   size?: number;
 }
 
+// Offscreen Document管理（一度だけ作成して再利用）
+let offscreenReady: Promise<void> | null = null;
+
+async function ensureOffscreenDocument(): Promise<void> {
+  // 既にREADY待ちPromiseがあればそれを返す
+  if (offscreenReady) {
+    console.log('既存のOffscreen Documentを再利用します');
+    return offscreenReady;
+  }
+
+  offscreenReady = (async () => {
+    try {
+      const path = 'src/offscreen/offscreen.html';
+
+      // 既存のOffscreen Documentがあるかチェック
+      const exists = await chrome.offscreen.hasDocument();
+
+      if (!exists) {
+        // Offscreen Documentを作成
+        await chrome.offscreen.createDocument({
+          url: chrome.runtime.getURL(path),
+          reasons: ['USER_MEDIA' as chrome.offscreen.Reason],
+          justification: 'Recording audio for real-time transcription',
+        });
+        console.log('Offscreen Documentを作成しました');
+      } else {
+        console.log('既存のOffscreen Documentが見つかりました');
+      }
+
+      // ポートベースでREADYシグナルを受信
+      await waitForOffscreenReady();
+    } catch (error) {
+      console.error('Offscreen Document作成エラー:', error);
+      offscreenReady = null; // エラー時はリセット
+      throw error;
+    }
+  })();
+
+  return offscreenReady;
+}
+
+// Offscreen DocumentからのREADYシグナルを待つ（ポートベース）
+function waitForOffscreenReady(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Offscreen Document READY timeout'));
+    }, 5000); // 5秒でタイムアウト
+
+    try {
+      const port = chrome.runtime.connect({ name: 'offscreen' });
+
+      port.onMessage.addListener((msg: any) => {
+        if (
+          msg &&
+          typeof msg === 'object' &&
+          'type' in msg &&
+          (msg as { type: string }).type === 'READY'
+        ) {
+          clearTimeout(timeout);
+          console.log('Offscreen Document READYシグナルを受信しました');
+          resolve();
+        }
+      });
+
+      port.onDisconnect.addListener(() => {
+        if (chrome.runtime.lastError) {
+          clearTimeout(timeout);
+          reject(new Error(`Port disconnected: ${chrome.runtime.lastError.message}`));
+        }
+      });
+    } catch (error) {
+      clearTimeout(timeout);
+      reject(error);
+    }
+  });
+}
+
+async function closeOffscreenDocument(): Promise<void> {
+  try {
+    const hasDocument = await chrome.offscreen.hasDocument();
+    if (hasDocument) {
+      await chrome.offscreen.closeDocument();
+      console.log('Offscreen Documentを閉じました');
+    }
+  } catch (error) {
+    console.error('Offscreen Document終了エラー:', error);
+  }
+}
+
 // メッセージリスナー
 chrome.runtime.onMessage.addListener((request: MessageRequest, _sender, sendResponse) => {
   switch (request.action) {
@@ -30,7 +119,7 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, _sender, sendResp
       break;
 
     case 'stopRecording':
-      stopRecording();
+      void stopRecording();
       sendResponse({ success: true });
       break;
 
@@ -60,6 +149,12 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, _sender, sendResp
           text: request.text,
         });
       }
+      break;
+
+    case 'offscreenReady':
+      // Offscreen DocumentからのREADYシグナル（waitForOffscreenReady()で処理）
+      console.log('Offscreen READYシグナルを受信しました');
+      sendResponse({ success: true });
       break;
 
     // Content scriptからのメッセージ処理
@@ -132,52 +227,84 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, _sender, sendResp
 
 // 録音開始
 async function startRecording() {
-  isRecording = true;
-  isPaused = false;
-  audioDataBuffer = [];
+  try {
+    isRecording = true;
+    isPaused = false;
+    audioDataBuffer = [];
 
-  // 録音状態をstorageに保存
-  await chrome.storage.local.set({ isRecording: true });
-
-  // 現在のアクティブタブを取得
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab && tab.id && tab.url?.includes('notion.so')) {
-    recordingTabId = tab.id;
-
-    // コンテンツスクリプトに録音開始を通知
-    void chrome.tabs.sendMessage(recordingTabId, { action: 'startRecording' });
-
-    // アイコンを録音中の状態に変更
-    updateIcon(true);
-  } else {
-    console.error('Notionのタブが見つかりません');
-    isRecording = false;
     // 録音状態をstorageに保存
+    await chrome.storage.local.set({ isRecording: true });
+
+    // 現在のアクティブタブを取得
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.id && tab.url?.includes('notion.so')) {
+      recordingTabId = tab.id;
+
+      // Offscreen Documentを作成（READYシグナルを待つ）
+      await ensureOffscreenDocument();
+
+      // Offscreen Documentに録音開始を通知
+      try {
+        await chrome.runtime.sendMessage({ action: 'startRecording' });
+        console.log('Offscreen Documentに録音開始メッセージを送信しました');
+      } catch (error) {
+        console.error('Offscreen Documentへのメッセージ送信エラー:', error);
+        throw error;
+      }
+
+      // アイコンを録音中の状態に変更
+      updateIcon(true);
+
+      console.log('録音を開始しました（Offscreen Document使用）');
+    } else {
+      console.error('Notionのタブが見つかりません');
+      isRecording = false;
+      // 録音状態をstorageに保存
+      await chrome.storage.local.set({ isRecording: false });
+      // エラー通知をポップアップに送信
+      void chrome.runtime.sendMessage({
+        action: 'recordingError',
+        error: 'Notionのタブでのみ録音できます',
+      });
+    }
+  } catch (error) {
+    console.error('録音開始エラー:', error);
+    isRecording = false;
     await chrome.storage.local.set({ isRecording: false });
-    // エラー通知をポップアップに送信
-    void chrome.runtime.sendMessage({
-      action: 'recordingError',
-      error: 'Notionのタブでのみ録音できます',
-    });
+    updateIcon(false);
   }
 }
 
 // 録音停止
-function stopRecording() {
-  isRecording = false;
-  isPaused = false;
+async function stopRecording() {
+  try {
+    isRecording = false;
+    isPaused = false;
 
-  // 録音状態をstorageに保存
-  void chrome.storage.local.set({ isRecording: false });
+    // 録音状態をstorageに保存
+    await chrome.storage.local.set({ isRecording: false });
 
-  if (recordingTabId) {
-    // コンテンツスクリプトに録音停止を通知
-    void chrome.tabs.sendMessage(recordingTabId, { action: 'stopRecording' });
-    recordingTabId = null;
+    // Offscreen Documentに録音停止を通知
+    await chrome.runtime.sendMessage({ action: 'stopRecording' }).catch(() => {
+      // Offscreen Documentが存在しない場合は無視
+      console.log('Offscreen Documentが見つかりません（既に停止済み）');
+    });
+
+    // Offscreen Documentを閉じる
+    await closeOffscreenDocument();
+
+    if (recordingTabId) {
+      recordingTabId = null;
+    }
+
+    // アイコンを通常の状態に戻す
+    updateIcon(false);
+
+    console.log('録音を停止しました');
+  } catch (error) {
+    console.error('録音停止エラー:', error);
+    updateIcon(false);
   }
-
-  // アイコンを通常の状態に戻す
-  updateIcon(false);
 }
 
 // 録音一時停止
@@ -300,7 +427,7 @@ chrome.contextMenus.onClicked.addListener((info, _tab) => {
 // タブが閉じられた時の処理
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === recordingTabId && isRecording) {
-    stopRecording();
+    void stopRecording();
   }
 });
 
@@ -323,7 +450,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
       } catch (error) {
         // タブが存在しない場合
         console.error('録音中のタブが見つかりません:', error);
-        stopRecording();
+        void stopRecording();
       }
     }
   })();

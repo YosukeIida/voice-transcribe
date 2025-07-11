@@ -20,7 +20,7 @@ export default defineManifest({
       '128': 'icons/icon-128.png',
     },
   },
-  permissions: ['storage', 'scripting', 'contextMenus'],
+  permissions: ['storage', 'scripting', 'contextMenus', 'offscreen'],
   host_permissions: ['https://www.notion.so/*', 'https://api.openai.com/*'],
   background: {
     service_worker: 'src/background/index.ts',
@@ -35,7 +35,7 @@ export default defineManifest({
   ],
   web_accessible_resources: [
     {
-      resources: ['src/content/audio-permission.html'],
+      resources: ['src/content/audio-permission.html', 'src/offscreen/offscreen.html'],
       matches: ['https://www.notion.so/*'],
     },
   ],
