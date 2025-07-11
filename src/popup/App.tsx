@@ -1,17 +1,43 @@
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import styles from './styles.module.css';
+
+interface RecordingStatus {
+  isRecording: boolean;
+  isPaused: boolean;
+  mimeType: string;
+  bufferSize: number;
+}
 
 export function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [hasApiKey, setHasApiKey] = useState(false);
 
-  // Chrome storageからAPIキーを取得
-  chrome.storage.local.get(['openaiApiKey'], (result) => {
-    if (result.openaiApiKey) {
-      setHasApiKey(true);
-    }
-  });
+  // 初期化処理
+  useEffect(() => {
+    // Chrome storageからAPIキーと録音状態を取得
+    chrome.storage.local.get(['openaiApiKey', 'isRecording'], (result) => {
+      if (result.openaiApiKey) {
+        setHasApiKey(true);
+      }
+
+      // まずストレージから録音状態を復元
+      if (typeof result.isRecording === 'boolean') {
+        setIsRecording(result.isRecording);
+      }
+    });
+
+    // バックグラウンドスクリプトから現在の録音状態を取得（より正確な状態）
+    chrome.runtime.sendMessage({ action: 'getRecordingStatus' }, (response: RecordingStatus) => {
+      if (chrome.runtime.lastError) {
+        console.error('録音状態の取得エラー:', chrome.runtime.lastError);
+        // エラーの場合はストレージの状態を信頼
+      } else if (response && typeof response.isRecording === 'boolean') {
+        setIsRecording(response.isRecording);
+        console.log('録音状態を同期しました:', response);
+      }
+    });
+  }, []);
 
   const handleStartRecording = async () => {
     if (!hasApiKey) {

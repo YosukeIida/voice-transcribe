@@ -136,6 +136,9 @@ async function startRecording() {
   isPaused = false;
   audioDataBuffer = [];
 
+  // 録音状態をstorageに保存
+  await chrome.storage.local.set({ isRecording: true });
+
   // 現在のアクティブタブを取得
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && tab.id && tab.url?.includes('notion.so')) {
@@ -149,6 +152,8 @@ async function startRecording() {
   } else {
     console.error('Notionのタブが見つかりません');
     isRecording = false;
+    // 録音状態をstorageに保存
+    await chrome.storage.local.set({ isRecording: false });
     // エラー通知をポップアップに送信
     void chrome.runtime.sendMessage({
       action: 'recordingError',
@@ -161,6 +166,9 @@ async function startRecording() {
 function stopRecording() {
   isRecording = false;
   isPaused = false;
+
+  // 録音状態をstorageに保存
+  void chrome.storage.local.set({ isRecording: false });
 
   if (recordingTabId) {
     // コンテンツスクリプトに録音停止を通知
@@ -257,6 +265,30 @@ chrome.runtime.onInstalled.addListener(() => {
     documentUrlPatterns: ['*://*.notion.so/*'],
   });
 });
+
+// Service Worker起動時の状態復元
+chrome.runtime.onStartup.addListener(() => {
+  void restoreRecordingState();
+});
+
+// Service Worker再起動時の状態復元
+chrome.runtime.onConnect.addListener(() => {
+  void restoreRecordingState();
+});
+
+// 録音状態を復元
+async function restoreRecordingState() {
+  try {
+    const result = await chrome.storage.local.get(['isRecording']);
+    if (result.isRecording) {
+      isRecording = true;
+      console.log('録音状態を復元しました');
+      updateIcon(true);
+    }
+  } catch (error) {
+    console.error('録音状態の復元に失敗しました:', error);
+  }
+}
 
 // コンテキストメニューのクリックハンドラ
 chrome.contextMenus.onClicked.addListener((info, _tab) => {
