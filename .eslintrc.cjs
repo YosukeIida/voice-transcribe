@@ -34,5 +34,5 @@ module.exports = {
     '@typescript-eslint/no-non-null-assertion': 'warn',
     'no-console': ['warn', { allow: ['warn', 'error'] }],
   },
-  ignorePatterns: ['dist', 'node_modules', '*.cjs'],
+  ignorePatterns: ['dist', 'node_modules', '*.cjs', '**/*.test.ts', '**/*.spec.ts', 'test/**/*', 'vitest.config.ts'],
 };
