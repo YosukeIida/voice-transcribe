@@ -18,6 +18,11 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      input: {
+        // メインエントリポイント
+        popup: 'popup.html',
+        offscreen: 'src/offscreen/offscreen.html',
+      },
       output: {
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',

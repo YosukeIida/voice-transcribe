@@ -34,7 +34,7 @@ describe('Recording State Synchronization', () => {
 
       expect(mockChrome.storage.local.set).toHaveBeenCalledWith(
         { isRecording: true },
-        expect.any(Function)
+        expect.any(Function),
       );
     });
 
@@ -49,7 +49,7 @@ describe('Recording State Synchronization', () => {
 
       expect(mockChrome.storage.local.set).toHaveBeenCalledWith(
         { isRecording: false },
-        expect.any(Function)
+        expect.any(Function),
       );
     });
 
@@ -87,36 +87,30 @@ describe('Recording State Synchronization', () => {
 
       // メッセージを送信
       return new Promise<void>((resolve) => {
-        mockChrome.runtime.sendMessage(
-          { action: 'getRecordingStatus' },
-          (response) => {
-            expect(response.isRecording).toBe(true);
-            expect(response.isPaused).toBe(false);
-            expect(response.mimeType).toBe('audio/webm');
-            resolve();
-          }
-        );
+        mockChrome.runtime.sendMessage({ action: 'getRecordingStatus' }, (response) => {
+          expect(response.isRecording).toBe(true);
+          expect(response.isPaused).toBe(false);
+          expect(response.mimeType).toBe('audio/webm');
+          resolve();
+        });
       });
     });
 
     it('should handle runtime errors gracefully', async () => {
       // エラーをシミュレート
       mockChrome.runtime.lastError = { message: 'Connection error' };
-      
+
       mockChrome.runtime.sendMessage.mockImplementation((message, callback) => {
         callback(null);
       });
 
       // メッセージを送信
       return new Promise<void>((resolve) => {
-        mockChrome.runtime.sendMessage(
-          { action: 'getRecordingStatus' },
-          (response) => {
-            expect(mockChrome.runtime.lastError).toBeTruthy();
-            expect(response).toBeNull();
-            resolve();
-          }
-        );
+        mockChrome.runtime.sendMessage({ action: 'getRecordingStatus' }, (response) => {
+          expect(mockChrome.runtime.lastError).toBeTruthy();
+          expect(response).toBeNull();
+          resolve();
+        });
       });
     });
   });
